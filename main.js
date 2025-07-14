@@ -3,6 +3,23 @@ const { ethers } = require("ethers");
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
+const fs = require("fs");
+const SUBSCRIBERS_FILE = "subscribers.json";
+
+function loadSubscribers() {
+  try {
+    return new Set(JSON.parse(fs.readFileSync(SUBSCRIBERS_FILE, "utf-8")));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSubscribers(subscribers) {
+  fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
+}
+
+const subscribers = loadSubscribers();
+
 const { BOT_TOKEN, CHAT_ID, WS_ETH, WS_ARB, WS_POLYGON, WS_BSC } = process.env;
 const bot = new TelegramBot(BOT_TOKEN, { polling: false });
 
@@ -42,6 +59,18 @@ const COINGECKO_CHAIN_ID_MAP = {
   Polygon: "polygon-pos",
   BSC: "binance-smart-chain",
 };
+
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  if (!subscribers.has(chatId)) {
+    subscribers.add(chatId);
+    saveSubscribers(subscribers);
+    bot.sendMessage(chatId, "✅ Вы подписались на Whale Watch!");
+  } else {
+    bot.sendMessage(chatId, "👀 Вы уже подписаны.");
+  }
+});
+
 
 const tokenCache = new Map();
 const short = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -114,13 +143,16 @@ async function processChain(chainKey, { name, rpc }) {
         `🐋 *Whale Alert* (${name})\n` +
         `Кит ${action} *${amount.toFixed(2)} ${symbol}* (~$${usdValue.toLocaleString("en-US", { maximumFractionDigits: 0 })})`;
 
-      await bot.sendMessage(CHAT_ID, msg, {
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [[{ text: "🛒 Купить на Uniswap", url: buyLink }]],
-        },
-      });
+for (const chatId of subscribers) {
+  await bot.sendMessage(chatId, msg, {
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [[{ text: "🛒 Купить на Uniswap", url: buyLink }]],
+    },
+  });
+}
+
 
       console.log(
         `✅ Отправлено: ${amount.toFixed(2)} ${symbol} ($${usdValue.toFixed(0)})`,
