@@ -2,9 +2,40 @@ require("dotenv").config();
 const { ethers } = require("ethers");
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
+const fs = require("fs");
 
-const { BOT_TOKEN, CHAT_ID, WS_ETH, WS_ARB, WS_POLYGON, WS_BSC } = process.env;
-const bot = new TelegramBot(BOT_TOKEN, { polling: false });
+const {
+  BOT_TOKEN,
+  WS_ETH,
+  WS_ARB,
+  WS_POLYGON,
+  WS_BSC,
+} = process.env;
+
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+
+const SUBSCRIBERS_FILE = "subscribers.json";
+let subscribers = new Set();
+
+// Загружаем подписчиков из файла
+try {
+  const raw = fs.readFileSync(SUBSCRIBERS_FILE, "utf-8");
+  subscribers = new Set(JSON.parse(raw));
+  console.log("✅ Подписчики загружены:", [...subscribers]);
+} catch {
+  console.log("ℹ️ Нет сохранённых подписчиков, начинаем с нуля.");
+}
+
+// Команда /start
+bot.onText(/\/start/, (msg) => {
+  const id = msg.chat.id;
+  if (!subscribers.has(id)) {
+    subscribers.add(id);
+    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify([...subscribers], null, 2));
+    console.log(`➕ Новый подписчик: ${id}`);
+  }
+  bot.sendMessage(id, "👋 Привет! Я бот Whale Watch. Теперь ты будешь получать крупные сделки китов.");
+});
 
 const CHAINS = {
   eth: { name: "Ethereum", rpc: WS_ETH },
@@ -89,10 +120,7 @@ async function processChain(chainKey, { name, rpc }) {
       const { from, to, value } = parsed.args;
 
       const tokenAddress = log.address.toLowerCase();
-      const { symbol, decimals, price } = await getTokenInfo(
-        tokenAddress,
-        name,
-      );
+      const { symbol, decimals, price } = await getTokenInfo(tokenAddress, name);
       if (!price || price === 0) continue;
 
       const amount = Number(ethers.formatUnits(value, decimals));
@@ -104,26 +132,23 @@ async function processChain(chainKey, { name, rpc }) {
         continue;
       }
 
-      const action = DEX_ROUTER_ADDRESSES.has(from.toLowerCase())
-        ? "купил"
-        : "получил";
-
+      const action = DEX_ROUTER_ADDRESSES.has(from.toLowerCase()) ? "купил" : "получил";
       const buyLink = `https://app.uniswap.org/#/swap?outputCurrency=${tokenAddress}`;
       const msg =
         `🐋 *Whale Alert* (${name})\n` +
         `Кит ${action} *${amount.toFixed(2)} ${symbol}* (~$${usdValue.toLocaleString("en-US", { maximumFractionDigits: 0 })})`;
 
-      await bot.sendMessage(CHAT_ID, msg, {
-        parse_mode: "Markdown",
-        disable_web_page_preview: true,
-        reply_markup: {
-          inline_keyboard: [[{ text: "🛒 Купить на Uniswap", url: buyLink }]],
-        },
-      });
+      for (const chatId of subscribers) {
+        await bot.sendMessage(chatId, msg, {
+          parse_mode: "Markdown",
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [[{ text: "🛒 Купить на Uniswap", url: buyLink }]],
+          },
+        });
+      }
 
-      console.log(
-        `✅ Отправлено: ${amount.toFixed(2)} ${symbol} ($${usdValue.toFixed(0)})`,
-      );
+      console.log(`✅ Отправлено ${subscribers.size} подписчикам: ${amount.toFixed(2)} ${symbol} ($${usdValue.toFixed(0)})`);
       return true;
     } catch (e) {
       console.warn("⚠️ Ошибка в обработке:", e.message);
@@ -143,7 +168,5 @@ async function loop() {
   setTimeout(loop, 600_000);
 }
 
-console.log(
-  "🐳 Бот запущен и работает в демо-режиме (1 сделка в 10 минут > $10,000)",
-);
+console.log("🐳 Бот запущен и работает в демо-режиме (1 сделка в 10 минут > $10,000)");
 loop();
