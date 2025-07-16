@@ -58,6 +58,21 @@ bot.onText(/\/threshold (\d+)/, (msg, match) => {
   );
 });
 
+bot.onText(/\/status/, (msg) => {
+  const id = msg.chat.id;
+  const threshold = subscribers[id]?.threshold || 10000;
+  const enabledChains = Object.values(CHAINS)
+    .map((c) => c.name)
+    .join(", ");
+
+  const statusMsg =
+    `🔧 *Текущие фильтры:*\n` +
+    `Минимальная сумма: *$${threshold.toLocaleString()}*\n` +
+    `Сети: ${enabledChains}`;
+
+  bot.sendMessage(id, statusMsg, { parse_mode: "Markdown" });
+});
+
 const CHAINS = {
   eth: { name: "Ethereum", rpc: WS_ETH },
   arb: { name: "Arbitrum", rpc: WS_ARB },
